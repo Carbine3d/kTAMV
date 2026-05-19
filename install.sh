@@ -57,7 +57,7 @@ MOONRAKER_ASVC=~/printer_data/moonraker.asvc
 # libatlas is used by NumPy
 # matplotlib is to find usable fonts
 # requests is used to make HTTP requests, it's used to communicate between the server and the extension
-PKGLIST="python3 python3-pip virtualenv curl python3-matplotlib python3-numpy python3-opencv python3-pil python3-flask libatlas-base-dev python3-waitress python3-jinja2 python3-requests"
+PKGLIST="python3 python3-pip python3-venv curl python3-matplotlib python3-numpy python3-opencv python3-pil python3-flask libatlas-base-dev python3-waitress python3-jinja2 python3-requests"
 
 
 #
@@ -103,18 +103,21 @@ log_blank()
 install_or_update_python_env()
 {
     log_header "Checking Python Virtual Environment For kTAMV..."
-    # If the service is already running, we can't recreate the virtual env
-    # so if it exists, don't try to create it.
-    if [ -d $KTAMV_ENV ]; then
-        log_error "Virtual environment found at ${KTAMV_ENV}, skipping creation."
-        # This virtual env refresh fails on some devices when the service is already running, so skip it for now.
-        # This only refreshes the virtual environment package anyways, so it's not super needed.
-        #log_info "Virtual environment found, updating to the latest version of python."
-        #python3 -m venv --upgrade "${KTAMV_ENV}"
+    # Check for a *working* venv (bin/python present). The third-party
+    # virtualenv tool on some Ubuntu builds produces a broken layout
+    # (local/bin/ instead of bin/), so just checking the directory exists
+    # isn't enough.
+    if [ -x "${KTAMV_ENV}/bin/python" ]; then
+        log_info "Working virtual environment found at ${KTAMV_ENV}, skipping creation."
     else
-        log_info "No virtual environment found, creating one now at ${KTAMV_ENV}."
-        mkdir -p "${KTAMV_ENV}"
-        virtualenv -p /usr/bin/python3 --system-site-packages "${KTAMV_ENV}"
+        if [ -d "${KTAMV_ENV}" ]; then
+            log_error "Existing ${KTAMV_ENV} is incomplete (no bin/python); recreating."
+            rm -rf "${KTAMV_ENV}"
+        fi
+        log_info "Creating Python virtual environment at ${KTAMV_ENV}."
+        # Use stdlib venv (not third-party virtualenv) for a reliable bin/ layout.
+        # --system-site-packages lets it see apt-installed numpy/opencv/flask.
+        python3 -m venv --system-site-packages "${KTAMV_ENV}"
     fi
 }
 
