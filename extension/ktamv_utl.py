@@ -145,9 +145,9 @@ def get_average_mpp(
         # Exclude the highest value if it deviates more than 20% from the mean value and recalculate. This is the most likely to be a deviant value
         if max(mpps) > mpp + (mpp * 0.20):
             __max_index = mpps.index(max(mpps))
-            mpps.remove(mpps[__max_index])
-            space_coordinates.remove(space_coordinates[__max_index])
-            camera_coordinates.remove(camera_coordinates[__max_index])
+            del mpps[__max_index]
+            del space_coordinates[__max_index]
+            del camera_coordinates[__max_index]
 
         # Calculate the average mm per pixel and the standard deviation
         mpps_std_dev, mpp = _get_std_dev_and_mean(mpps)
@@ -156,30 +156,34 @@ def get_average_mpp(
         # Exclude the lowest value if it deviates more than 20% from the mean value
         if min(mpps) < mpp - (mpp * 0.20):
             __min_index = mpps.index(min(mpps))
-            mpps.remove(mpps[__min_index])
-            space_coordinates.remove(space_coordinates[__min_index])
-            camera_coordinates.remove(camera_coordinates[__min_index])
+            del mpps[__min_index]
+            del space_coordinates[__min_index]
+            del camera_coordinates[__min_index]
 
         # Calculate the average mm per pixel and the standard deviation
         mpps_std_dev, mpp = _get_std_dev_and_mean(mpps)
 
         # ----------------- 3rd recalculation -----------------
         # Exclude the values that are more than 2 standard deviations from mean
-        for i in reversed(range(len(list(mpps)))):
+        for i in reversed(range(len(mpps))):
             if mpps[i] > mpp + (mpps_std_dev * 2) or mpps[i] < mpp - (mpps_std_dev * 2):
-                mpps.remove(mpps[i])
-                space_coordinates.remove(space_coordinates[i])
-                camera_coordinates.remove(camera_coordinates[i])
+                del mpps[i]
+                del space_coordinates[i]
+                del camera_coordinates[i]
 
         # Calculate the average mm per pixel and the standard deviation
         mpps_std_dev, mpp = _get_std_dev_and_mean(mpps)
 
         # ----------------- 4th recalculation -----------------
-        # Exclude any other value that deviates more than 25% from mean value
+        # Exclude any other value that deviates more than 25% from mean value.
+        # Must remove from all three lists in lockstep — otherwise space and
+        # camera coordinates at index i become orphaned and feed the
+        # transform matrix with mismatched pairs.
         for i in reversed(range(len(mpps))):
             if mpps[i] > mpp + (mpp * 0.25) or mpps[i] < mpp - (mpp * 0.25):
-                # logging.debug("Removing value %s from list" % str(mpps[i]))
-                mpps.remove(mpps[i])
+                del mpps[i]
+                del space_coordinates[i]
+                del camera_coordinates[i]
 
         # Calculate the average mm per pixel and the standard deviation
         mpps_std_dev, mpp = _get_std_dev_and_mean(mpps)

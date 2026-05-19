@@ -545,7 +545,7 @@ class ktamv:
                 + str(_rr)
             )
 
-            raise self.gcode.error(e).with_traceback(e.__traceback__)
+            raise self.gcode.error(str(e)).with_traceback(e.__traceback__)
 
     def getMMperPixel(
         self, distance_traveled=[], from_camera_point=[], to_camera_point=[]

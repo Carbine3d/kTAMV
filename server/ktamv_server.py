@@ -10,12 +10,14 @@ from dataclasses import dataclass, field
 from ktamv_server_dm import Ktamv_Server_Detection_Manager as dm
 
 __logdebug = ""
-# URL to the cloud server
-__CLOUD_URL = "http://ktamv.ignat.se/index.php"
+# Cap in-memory debug log so long-running servers don't OOM
+__LOGDEBUG_MAX_CHARS = 200_000
+# Cap stored request results so the dict doesn't grow unbounded
+__REQUEST_RESULTS_MAX = 500
 # If no nozzle found in this time, timeout the function
-__CV_TIMEOUT = 20  
+__CV_TIMEOUT = 20
 # Minimum amount of matches to confirm toolhead position after a move
-__CV_MIN_MATCHES = 3 
+__CV_MIN_MATCHES = 3
 # Size of frame to use
 _FRAME_WIDTH = 640
 _FRAME_HEIGHT = 480
@@ -41,7 +43,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
     datefmt="%a, %d %b %Y %H:%M:%S",
     filename="logs/ktamv_server.log",
-    filemode="w",
+    filemode="a",  # append, preserve history across restarts
     encoding="utf-8",
 )
 
@@ -57,8 +59,6 @@ __processed_frame_as_bytes = None
 __standby_image = None
 # Define a global variable to store the camera path.
 _camera_url = None
-# Whether to send the frame to the cloud
-__send_frame_to_cloud = False
 # Define a global variable to store a key-value pair of the request id and the result
 request_results = dict()
 # The transform matrix calculated from the calibration points
@@ -134,40 +134,26 @@ def set_server_cfg():
     show_error_message_to_image("")
     try:
         log("*** calling set_server_cfg ***")
-        camera_url = None
         response = ""
 
         # Stoping preview if running
-        global __preview_running, __detection_tolerance, __send_frame_to_cloud
+        global __preview_running, __detection_tolerance
         __preview_running = False
-        
-        # Get the camera path from the JSON object
+
+        # Parse JSON once (was parsed three times before)
         try:
             data = json.loads(request.data)
-            camera_url = data.get("camera_url")
         except json.JSONDecodeError:
-            show_error_message_to_image("Error: Could not set camera URL.")
+            show_error_message_to_image("Error: Could not parse JSON.")
             return "JSON Decode Error", 400
-        
-        try:
-            data = json.loads(request.data)
-            send_frame_to_cloud = data.get("send_frame_to_cloud")
-        except:
-            pass
 
-        if send_frame_to_cloud is not None:
-            if send_frame_to_cloud == True:
-                __send_frame_to_cloud = True
-                response += "send_frame_to_cloud set to True\n"
-            else:
-                __send_frame_to_cloud = False
-                response += "send_frame_to_cloud set to False\n"
+        camera_url = data.get("camera_url")
 
-        try:
-            data = json.loads(request.data)
-            __detection_tolerance = data.get("detection_tolerance")
-        except:
-            pass
+        # Only override detection_tolerance if explicitly provided
+        provided_tolerance = data.get("detection_tolerance")
+        if provided_tolerance is not None:
+            __detection_tolerance = provided_tolerance
+            response += f"detection_tolerance set to {__detection_tolerance}\n"
 
         if camera_url is None:
             show_error_message_to_image("Error: Could not set camera URL.")
@@ -271,23 +257,21 @@ def getNozzlePosition():
         request_id = random.randint(0, 1000000)
 
         if _camera_url is None:
-            request_results[request_id] = Ktamv_Request_Result(
+            _store_request_result(request_id, Ktamv_Request_Result(
                 request_id, None, time.time() - start_time, 502, "Camera URL not set"
-            )
+            ))
             log("*** end of getNozzlePosition - Camera URL not set ***<br>")
             return jsonify(request_results[request_id])
 
 
-        request_results[request_id] = Ktamv_Request_Result(
+        _store_request_result(request_id, Ktamv_Request_Result(
             request_id, None, None, 202, "Accepted"
-        )
+        ))
         log("request_results: " + str(request_results))
 
         def do_work():
             log("*** calling do_work ***")
-            detection_manager = dm(
-                log, _camera_url, __CLOUD_URL, __send_frame_to_cloud
-            )
+            detection_manager = dm(log, _camera_url)
 
             position = detection_manager.recursively_find_nozzle_position(
                 put_frame, __CV_MIN_MATCHES, __CV_TIMEOUT, __detection_tolerance
@@ -309,8 +293,7 @@ def getNozzlePosition():
                     "OK"
                 )
 
-            global request_results
-            request_results[request_id] = request_result_object
+            _store_request_result(request_id, request_result_object)
 
             log("*** end of do_work ***")
 
@@ -340,20 +323,14 @@ def preview():
 
         def do_preview():
             log("*** calling do_preview ***")
-            # Do not send images from preview to the cloud
-            detection_manager = dm(
-                log, _camera_url, cloud_url = "", send_to_cloud = False
-            )
-            
+            detection_manager = dm(log, _camera_url)
+
             while __preview_running:
                 dm.get_preview_frame(detection_manager, put_frame)
-                
+                # Throttle inside the loop to cap FPS and avoid pinning a CPU core
+                time.sleep(1 / __PREVIEW_FPS)
 
             log("*** end of do_preview ***")
-
-            # Wait for 1s/FPS for a maximum FPS.
-            # This is to avoid overloading the server
-            time.sleep(1 / __PREVIEW_FPS)
 
         # Handle the action
         if action == "stop":
@@ -477,11 +454,24 @@ def log_clear():
 def log(message: str):
     global __logdebug
     __logdebug += message + "<br>"
+    # Truncate to avoid unbounded growth on long-running servers
+    if len(__logdebug) > __LOGDEBUG_MAX_CHARS:
+        __logdebug = __logdebug[-__LOGDEBUG_MAX_CHARS:]
 
 
 def log_get():
     global __logdebug
     return __logdebug
+
+
+def _store_request_result(request_id, result):
+    """Store a request result and evict oldest entries when the dict overflows."""
+    request_results[request_id] = result
+    if len(request_results) > __REQUEST_RESULTS_MAX:
+        # FIFO eviction — pop until back under the cap
+        excess = len(request_results) - __REQUEST_RESULTS_MAX
+        for key in list(request_results.keys())[:excess]:
+            request_results.pop(key, None)
 
 def show_error_message_to_image(message : str):
     global __error_message_to_image, __update_static_image
@@ -495,11 +485,17 @@ if __name__ == "__main__":
     # Create an argument parser
     parser = ArgumentParser()
     parser.add_argument("--port", type=int, default=8085, help="Port number")
+    # Default to localhost only — Klipper extension talks to the server over
+    # loopback, so don't expose CV endpoints (which can be abused for SSRF or
+    # to tamper with the transform matrix) to the whole LAN.
+    parser.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Host/interface to bind. Default 127.0.0.1; use 0.0.0.0 only if you know why.",
+    )
 
     # Parse the command-line arguments
     args = parser.parse_args()
 
-    # Run the app with the specified port
-    # app.run(host="0.0.0.0", port=args.port, debug=True)
-    # app.run(host='0.0.0.0', port=args.port, debug=False)
-    serve(app, host='0.0.0.0', port=args.port)
+    serve(app, host=args.host, port=args.port)

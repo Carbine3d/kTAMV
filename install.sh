@@ -41,9 +41,6 @@ SYSTEMDDIR="/etc/systemd/system"
 # Path to the moonraker asvc file where services are defined
 MOONRAKER_ASVC=~/printer_data/moonraker.asvc
 
-# Agree to send images to the developer
-SEND_IMAGES="false"
-
 
 # Note that this is parsed by the update process to find and update required system packages on update!
 # This var name MUST BE `PKGLIST`!!
@@ -264,10 +261,10 @@ install_update_manager() {
         if [ "${already_included}" -eq 0 ]; then
             echo "" >> "${dest}"    # Add a blank line
             echo "" >> "${dest}"    # Add a blank line
-            echo -e "[update_manager ktamv]]" >> "${dest}"    # Add the section header
+            echo -e "[update_manager ktamv]" >> "${dest}"    # Add the section header
             echo -e "type: git_repo" >> "${dest}"
             echo -e "path: ~/kTAMV" >> "${dest}"
-            echo -e "origin: https://github.com/TypQxQ/kTAMV.git" >> "${dest}"
+            echo -e "origin: https://github.com/Carbine3d/kTAMV.git" >> "${dest}"
             echo -e "primary_branch: main" >> "${dest}"
             echo -e "install_script: install.sh" >> "${dest}"
             echo -e "managed_services: klipper" >> "${dest}"
@@ -304,7 +301,6 @@ install_klipper_config() {
             echo -e "nozzle_cam_url: http://localhost/webcam/snapshot?max_delay=0" >> "${dest}"   # Add the address of the webcam stream that will be accessed by the server
             echo -e "server_url: http://localhost:${PORT}" >> "${dest}"    # Add the address of the kTAMV server that will be accessed Klipper
             echo -e "move_speed: 1800" >> "${dest}"   # Add the speed at which the toolhead moves when aligning
-            echo -e "send_frame_to_cloud: ${SEND_IMAGES}" >> "${dest}"   # If true, the images of the nozzle will be sent to the developer
             echo -e "detection_tolerance: 0" >> "${dest}"   # number of pixels to have as tolerance when detecting the nozzle.
 
             log_info "Added kTAMV configuration to printer.cfg"
@@ -501,26 +497,6 @@ log_header "                     kTAMV"
 log_header "   Klipper Tool Alignment (using) Machine Vision"
 log_blank
 log_blank
-log_important "Do you want to contribute to the development of kTAMV?"
-log_info "I would love if you would like to share the images of the nozzle and obtained results taken when finding the nozzle."
-log_info "I plan to use it to improve the algorithm and maybe train an AI as the next step."
-log_info "You can change this setting later in printer.cfg."
-log_blank
-
-yn=$(prompt_yn "Do you want to continue?")
-echo
-case $yn in
-    y)
-        log_info "Thank you, this will help a lot!"
-        log_blank
-        SEND_IMAGES="true"
-        ;;
-    n)
-        log_info "Will not send any info."
-        log_blank
-        SEND_IMAGES="false"
-        ;;
-esac
 
 
 

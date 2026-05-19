@@ -9,18 +9,15 @@ class Ktamv_Server_Detection_Manager:
     
     ##### Setup functions
     # init function
-    def __init__(self, log, camera_url, cloud_url, send_to_cloud = False, *args, **kwargs):
+    def __init__(self, log, camera_url, *args, **kwargs):
         try:
             self.log = log
 
             # send calling to log
             self.log('*** calling DetectionManager.__init__')
-            
-            # Whether to send the images to the cloud after detection.
-            self.send_to_cloud = send_to_cloud
-            
+
             # The already initialized io object.
-            self.__io = io(log=log, camera_url=camera_url, cloud_url=cloud_url, save_image=False)
+            self.__io = io(log=log, camera_url=camera_url, save_image=False)
             
             # This is the last successful algorithm used by the nozzle detection. Should be reset at tool change. Will have to change.
             self.__algorithm = None
@@ -62,9 +59,6 @@ class Ktamv_Server_Detection_Manager:
                 pos_matches += 1
                 if pos_matches >= min_matches:
                     self.log("recursively_find_nozzle_position found %i matches and returning" % pos_matches)
-                    # Send the frame and detection to the cloud if enabled.
-                    if self.send_to_cloud:
-                        self.__io.send_frame_to_cloud(frame, pos, self.__algorithm)
                     break
             else:
                 self.log("Position found does not match last position. Last position: %s, current position: %s" % (str(last_pos), str(pos)))   
@@ -247,7 +241,7 @@ class Ktamv_Server_Detection_Manager:
                 # use the one closest to the center of the image.
                 closest_index = self.find_closest_keypoint(keypoints)
                 # create center object from centermost keypoint
-                (x,y) = np.around([keypoints[closest_index]].pt)
+                (x,y) = np.around(keypoints[closest_index].pt)
             else:
                 # create center object from first and only keypoint
                 (x,y) = np.around(keypoints[0].pt)
@@ -282,7 +276,8 @@ class Ktamv_Server_Detection_Manager:
         try:
             outputFrame = self.adjust_gamma(image=frameInput, gamma=1.2)
             height, width, channels = outputFrame.shape
-        except: outputFrame = copy.deepcopy(frameInput)
+        except (AttributeError, ValueError, cv2.error):
+            outputFrame = copy.deepcopy(frameInput)
         if(algorithm == 0):
             yuv = cv2.cvtColor(outputFrame, cv2.COLOR_BGR2YUV)
             yuvPlanes = cv2.split(yuv)
@@ -300,7 +295,7 @@ class Ktamv_Server_Detection_Manager:
 
         return(outputFrame)
 
-    def find_closest_keypoint(keypoints):
+    def find_closest_keypoint(self, keypoints):
         closest_index = None
         closest_distance = float('inf')
         target_point = np.array([320, 240])
